@@ -1,6 +1,6 @@
 library(sl3)
-library(tidyverse)
-
+library(dplyr)
+library(readr)
 
 loss_quantile <- function(tau) {
   function(pred, observed) {
@@ -16,10 +16,7 @@ quantile_sl <- function(task, tau) {
   drf_learner <- Lrnr_drf$new(tau = tau, num.trees = 2e3)
   
   solnp <- Lrnr_solnp$new(eval_function = loss_quantile(tau))
-  #sl <- Lrnr_sl$new(learners = list(lightgbm_learner, quantreg_learner, grf_learner, qrnn_learner, drf_learner), solnp)
-  sl <- Lrnr_sl$new(learners = list(lightgbm_learner, quantreg_learner, grf_learner, drf_learner), solnp)
-  
-  options(sl3.verbose = TRUE)
+  sl <- Lrnr_sl$new(learners = list(lightgbm_learner, quantreg_learner, grf_learner, qrnn_learner, drf_learner), solnp)
   
   sl_fit <- sl$train(task)
   sl_fit
@@ -36,4 +33,3 @@ perovskite_task <- sl3_Task$new(
   folds = 5L,
   outcome_type = "continuous"
 )
-
