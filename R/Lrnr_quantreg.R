@@ -76,3 +76,4 @@ Lrnr_quantreg <- R6Class(
     .required_packages = c("quantreg")
   )
 )
+
