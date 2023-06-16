@@ -1,8 +1,15 @@
 library(R6)
-library(tidyverse)
+library(dplyr)
+library(tibble)
 library(quantreg)
 library(sl3)
 library(qrnn)
+library(future)
+library(tidyr)
+library(purrr)
+library(furrr)
+
+plan(multisession, workers = 3)
 
 source("R/Lrnr_quantreg.R")
 source("R/Lrnr_qrnn.R")
@@ -17,8 +24,8 @@ setup <- tribble(
   "Energy Bandgap", perovskite_task
 ) %>%
   expand_grid(quantile = quantiles) %>%
-  mutate(fit = map2(task, quantile, quantile_sl),
-         cv_fit = pmap(list(fit, task, quantile), function(fit, task, quantile) {
+  mutate(fit = future_map2(task, quantile, quantile_sl),
+         cv_fit = future_pmap(list(fit, task, quantile), function(fit, task, quantile) {
            cv_sl(lrnr_sl = fit, task = task, eval_fun = loss_quantile(quantile))
          }))
 
