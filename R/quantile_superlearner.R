@@ -4,13 +4,13 @@ library(tibble)
 library(quantreg)
 library(sl3)
 library(qrnn)
-library(future)
 library(tidyr)
 library(purrr)
-library(furrr)
 library(data.table)
+library(future)
+library(furrr)
 
-
+print("Loading files...")
 source("R/Lrnr_quantreg.R")
 source("R/Lrnr_qrnn.R")
 source("R/Lrnr_qgam.R")
@@ -19,34 +19,42 @@ source("R/Lrnr_drf.R")
 source("R/quantile_tasks.R")
 
 source("R/cv.R")
+print("Done loading")
 
-plan(multisession, workers = 3)
+plan(multisession, workers = 28)
 
-quantiles <- c(0.1, 0.5, 0.9)
+quantiles <- c(0.025, 0.05, 0.1, 0.5, 0.9, 0.95, 0.975)
+opts <- furrr_options(seed = TRUE, globals = c("my_cv_sl", "quantile_sl", "loss_quantile", "Lrnr_quantreg", "Lrnr_qrnn", "Lrnr_qgam", "Lrnr_drf"), packages = c("R6", "sl3", "qrnn", "qgam", "drf", "gbm", "grf", "tibble", "dplyr", "tidyr", "purrr", "data.table"))
+
+options(sl3.verbose = TRUE)
+
 setup <- tribble(
   ~name, ~task,
   "Energy Formation", perovskite_task_formation,
   "Energy Bandgap", perovskite_task
 ) %>%
   expand_grid(quantile = quantiles) %>%
-  mutate(fit = future_map2(task, quantile, quantile_sl),
-         cv_fit = future_pmap(list(fit, task, quantile), function(fit, task, quantile) {
-           cv_sl(lrnr_sl = fit, task = task, eval_fun = loss_quantile(quantile))
-         }))
+  mutate(fit = future_map2(task, quantile, function(task, quantile) {
+    library(R6)
+    source("R/Lrnr_quantreg.R")
+    source("R/Lrnr_qrnn.R")
+    source("R/Lrnr_qgam.R")
+    source("R/Lrnr_drf.R")
 
-#lower <- setup$cv_fit[[1]]$cv_sl_fit$predict()
-#upper <- setup$cv_fit[[2]]$cv_sl_fit$predict()
+    print(glue::glue("Starting fit for {quantile}..."))
 
-#plot(lower, upper)
+    fit = quantile_sl(task, quantile)
+    preds = as_tibble(fit$predict())
+    preds_cv = as_tibble(fit$fit_object$cv_fit$predict())
 
-#lower <- setup$fit[[1]]$predict()
-#upper <- setup$fit[[2]]$predict()
-#mean(lower <= perovskite_task$Y & upper >= perovskite_task$Y)
-#
-#mean(
-#  setup$fit[[1]]$learner_fits$Lrnr_gbm_10000_2_0.1$predict() <= perovskite_task$Y &
-#  setup$fit[[2]]$learner_fits$Lrnr_gbm_10000_2_0.1$predict() >= perovskite_task$Y
-#)
+    options(sl3.verbose = TRUE)
+
+    print(glue::glue("Starting cv fit for {quantile}"))
+    cv_fit = my_cv_sl(lrnr_sl = fit, task = task, eval_fun = loss_quantile(quantile))
+
+    list(preds = preds, preds_cv = preds_cv, cv_fit = cv_fit)
+  #}))
+  }, .options = opts))
 
 write_rds(setup, "cv_results.rds")
 

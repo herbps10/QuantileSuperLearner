@@ -1,7 +1,10 @@
-library(tidyverse)
+library(dplyr)
+library(purrr)
+library(tidyr)
 library(furrr)
 library(future)
 library(progressr)
+library(readr)
 
 simulate <- function(seed, N, dgp = "complex", rho = 0, sigma = 0.1, alpha_lower = 0.1, alpha_upper = 0.9) {
   set.seed(seed)
@@ -54,7 +57,7 @@ fit_quantile <- function(data, tau, t0 = 500, p = NULL) {
   x <- as.matrix(data[, covars])
   y <- data$Y
   
-  fit1 <- quantreg::rq(form1, data = data[train,], tau = tau)
+  fit1 <- quantreg::rq(form1, data = data[train,], tau = tau, method = "fn")
   fit2 <- lightgbm::lightgbm(x[train,], y[train], params = list(objective = "quantile", alpha = tau), nrounds = 5e2, verbose = -1)
   fit3 <- grf::quantile_forest(x[train,], y[train])
   fit4 <- qrnn::qrnn.fit(x[train,], as.matrix(y[train]), n.hidden = 2, tau = tau)
@@ -101,8 +104,8 @@ compute_width <- function(data, preds, fit_lower, fit_upper) {
 }
 
 
-plan(multisession, workers = 6)
-N_sims <- 25
+plan(multisession, workers = 40)
+N_sims <- 50
 setup <- expand_grid(
   sim = 1:N_sims,
   #rho = c(0.5, 0.9, 0.99),
@@ -121,29 +124,28 @@ foptions <- furrr::furrr_options(seed = TRUE)
 with_progress({
   p <- progressr::progressor(steps = nrow(setup) * 3)
   preds <- setup %>%
-    mutate(preds_lower  = future_map(data, fit_quantile, tau = 0.1, t0 = 1e3, p = p, .options = foptions),
-           preds_middle = future_map(data, fit_quantile, tau = 0.5, t0 = 1e3, p = p, .options = foptions),
-           preds_upper  = future_map(data, fit_quantile, tau = 0.9, t0 = 1e3, p = p, .options = foptions))
+    mutate(preds0.025 = future_map(data, fit_quantile, tau = 0.1,   t0 = 1e3, p = p, .options = foptions),
+           preds0.05  = future_map(data, fit_quantile, tau = 0.05,  t0 = 1e3, p = p, .options = foptions),
+           preds0.1   = future_map(data, fit_quantile, tau = 0.1,   t0 = 1e3, p = p, .options = foptions),
+           preds0.5   = future_map(data, fit_quantile, tau = 0.5,   t0 = 1e3, p = p, .options = foptions),
+           preds0.9   = future_map(data, fit_quantile, tau = 0.9,   t0 = 1e3, p = p, .options = foptions),
+           preds0.95  = future_map(data, fit_quantile, tau = 0.95,  t0 = 1e3, p = p, .options = foptions),
+           preds0.975 = future_map(data, fit_quantile, tau = 0.975, t0 = 1e3, p = p, .options = foptions))
 })
 
 with_progress({
   p <- progressr::progressor(steps = nrow(preds) * 3)
   
-  plan(multisession, workers = 12)
+  plan(multisession, workers = 80)
   fits <- preds %>%
     expand_grid(method = c("BOA", "EWA", "SuperLearner")) %>%
-    mutate(fit_lower  = future_pmap(list(data, preds_lower, method),  apply_aggregation, 0.1, p = p, .options = foptions),
-           fit_middle = future_pmap(list(data, preds_middle, method), apply_aggregation, 0.5, p = p, .options = foptions),
-           fit_upper  = future_pmap(list(data, preds_upper, method),  apply_aggregation, 0.9, p = p, .options = foptions))
+    mutate(fit0.025 = future_pmap(list(data, preds0.025, method), apply_aggregation, 0.025, p = p, .options = foptions),
+           fit0.05  = future_pmap(list(data, preds0.05, method),  apply_aggregation, 0.05,  p = p, .options = foptions),
+           fit0.1   = future_pmap(list(data, preds0.1, method),   apply_aggregation, 0.1,   p = p, .options = foptions),
+           fit0.5   = future_pmap(list(data, preds0.5, method),   apply_aggregation, 0.5,   p = p, .options = foptions),
+           fit0.9   = future_pmap(list(data, preds0.9, method),   apply_aggregation, 0.9,   p = p, .options = foptions),
+           fit0.95  = future_pmap(list(data, preds0.95, method),  apply_aggregation, 0.95,  p = p, .options = foptions),
+           fit0.975 = future_pmap(list(data, preds0.975, method), apply_aggregation, 0.975, p = p, .options = foptions))
 })
 
-results <- fits %>%
-  mutate(loss_lower  = pmap_dbl(list(data, preds_lower, fit_lower),   mean_loss, quantile = 0.1),
-         loss_middle = pmap_dbl(list(data, preds_middle, fit_middle), mean_loss, quantile = 0.5),
-         loss_upper  = pmap_dbl(list(data, preds_upper, fit_upper),   mean_loss, quantile = 0.9),
-         coverage    = pmap_dbl(list(data, preds_lower, fit_lower, fit_upper), compute_coverage),
-         width       = pmap_dbl(list(data, preds_lower, fit_lower, fit_upper), compute_width))
-
-results %>%
-  group_by(N, rho, method) %>%
-  summarize_at(vars(loss_lower, loss_middle, loss_upper, coverage, width), mean)
+write_rds(fits, "online_simulation_results.rds")

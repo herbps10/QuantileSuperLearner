@@ -1,5 +1,9 @@
 library(sl3)
-library(tidyverse)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(purrr)
+library(stringr)
 library(R6)
 library(data.table)
 library(furrr)
@@ -39,22 +43,18 @@ quantile_sl_interval <- function(task, taus) {
 quantile_sl <- function(task, tau) {
   lightgbm_learner <- Lrnr_lightgbm$new(obj = "quantile", objective = "quantile", alpha = tau, nrounds = 150, verbose = -1)
   quantreg_learner <- Lrnr_quantreg$new(tau = tau)
-  #quantreg_lasso_learner <- Lrnr_quantreg$new(tau = tau, method = "lasso")
   qrnn_learner <- Lrnr_qrnn$new(tau = tau, n.hidden = 2)
-  #qrnn_learner2 <- Lrnr_qrnn$new(tau = tau, n.hidden = 3)
   grf_learner <- Lrnr_grf$new(quantiles = tau, quantiles_pred = tau, num.trees = 2e3)
-  #xgboost_learner <- Lrnr_xgboost$new(objective = "reg:quantileerror", quantile_alpha = tau, learning_rate = 0.1, nrounds = 200, max_depth = 1, subsample = 0.5)
   qgam_learner <- Lrnr_qgam$new(qu = tau)
   
   solnp <- Lrnr_solnp$new(eval_function = loss_quantile(tau))
-  #sl <- Lrnr_sl$new(learners = list(quantreg_learner, lightgbm_learner, xgboost_learner, grf_learner, qrnn_learner, qrnn_learner2, quantreg_lasso_learner, qgam_learner), solnp)
   sl <- Lrnr_sl$new(learners = list(quantreg_learner, lightgbm_learner, qrnn_learner, grf_learner, qgam_learner), solnp)
   
   sl_fit <- sl$train(task)
   sl_fit
 }
 
-simulate <- function(seed, N, dgp, holdout_frac = 0.2, alpha_lower = 0.1, alpha_upper = 0.9) {
+simulate <- function(seed, N, dgp, holdout_frac = 0.2) {
   set.seed(seed)
   N <- N + 1e3
   X1 <- runif(N, -2, 2)
@@ -80,9 +80,13 @@ simulate <- function(seed, N, dgp, holdout_frac = 0.2, alpha_lower = 0.1, alpha_
     X5 = X5,
     mu = mu,
     Y = mu + rnorm(N, 0, sigma),
-    q_lower = qnorm(alpha_lower, mu, sigma),
-    q_median = qnorm(0.5, mu, sigma),
-    q_upper = qnorm(alpha_upper, mu, sigma),
+    q0.025 = qnorm(0.025, mu, sigma),
+    q0.05 = qnorm(0.05, mu, sigma),
+    q0.1 = qnorm(0.1, mu, sigma),
+    q0.5 = qnorm(0.5, mu, sigma),
+    q0.9 = qnorm(0.9, mu, sigma),
+    q0.95 = qnorm(0.95, mu, sigma),
+    q0.975 = qnorm(0.975, mu, sigma),
     heldout = FALSE
   )
   heldout <- sample(1:nrow(data), size = 1e3)
@@ -99,11 +103,14 @@ fit <- function(data) {
     folds = 5L,
     outcome_type = "continuous"
   )
-  
-  fit_lower <- quantile_sl(task, 0.1)
-  fit_median <- quantile_sl(task, 0.5)
-  fit_upper <- quantile_sl(task, 0.9)
-  #fit_interval <- quantile_sl_interval(task, c(0.1, 0.9))
+
+  fit0.025 <- quantile_sl(task, 0.025)
+  fit0.05  <- quantile_sl(task, 0.05)
+  fit0.1   <- quantile_sl(task, 0.1)
+  fit0.5   <- quantile_sl(task, 0.5)
+  fit0.9   <- quantile_sl(task, 0.9)
+  fit0.95  <- quantile_sl(task, 0.95)
+  fit0.975 <- quantile_sl(task, 0.975)
   
   holdout_data <- data[data$heldout == TRUE, ]
   
@@ -114,26 +121,38 @@ fit <- function(data) {
     outcome_type = "continuous"
   )
       
-  sl_lower  <- fit_lower$predict(holdout_task)
-  sl_median <- fit_median$predict(holdout_task)
-  sl_upper  <- fit_upper$predict(holdout_task)
+  sl0.025  <- fit0.025$predict(holdout_task)
+  sl0.05   <- fit0.05$predict(holdout_task)
+  sl0.1    <- fit0.1$predict(holdout_task)
+  sl0.5    <- fit0.5$predict(holdout_task)
+  sl0.9    <- fit0.9$predict(holdout_task)
+  sl0.95   <- fit0.95$predict(holdout_task)
+  sl0.975  <- fit0.975$predict(holdout_task)
   
   preds <- tibble(
-    learner = rep("SuperLearner", length(sl_lower)), 
-    index = 1:length(sl_lower), 
-    lower = sl_lower, 
-    median = sl_median, 
-    upper = sl_upper
+    learner   = rep("SuperLearner", length(sl0.1)), 
+    index     = 1:length(sl0.1), 
+    pred0.025 = sl0.025, 
+    pred0.05  = sl0.05, 
+    pred0.1   = sl0.1, 
+    pred0.5   = sl0.5, 
+    pred0.9   = sl0.9,
+    pred0.95  = sl0.95,
+    pred0.975 = sl0.975
   )
   
-  for(n in seq_along(fit_lower$learner_fits)) {
-    learner_name <- str_replace_all(names(fit_lower$learner_fits)[[n]], "_0\\.[159]", "")
+  for(n in seq_along(fit0.1$learner_fits)) {
+    learner_name <- str_replace_all(names(fit0.1$learner_fits)[[n]], "_0\\.[159]", "")
     preds <- bind_rows(preds, tibble(
-      index = 1:length(sl_lower),
-      learner = rep(learner_name, length(sl_lower)),
-      lower = fit_lower$learner_fits[[n]]$predict(holdout_task),
-      median = fit_median$learner_fits[[n]]$predict(holdout_task),
-      upper = fit_upper$learner_fits[[n]]$predict(holdout_task)
+      index = 1:length(sl0.1),
+      learner = rep(learner_name, length(sl0.1)),
+      pred0.025 = fit0.025$learner_fits[[n]]$predict(holdout_task),
+      pred0.05  = fit0.05$learner_fits[[n]]$predict(holdout_task),
+      pred0.1   = fit0.1$learner_fits[[n]]$predict(holdout_task),
+      pred0.5   = fit0.5$learner_fits[[n]]$predict(holdout_task),
+      pred0.9   = fit0.9$learner_fits[[n]]$predict(holdout_task),
+      pred0.95  = fit0.95$learner_fits[[n]]$predict(holdout_task),
+      pred0.975 = fit0.975$learner_fits[[n]]$predict(holdout_task)
     ))
   }
   preds <- preds %>%
@@ -144,26 +163,33 @@ fit <- function(data) {
   
   return(list(
     preds = preds,
-    coefs = list(lower = fit_lower$coefficients, median = fit_median$coefficients, upper = fit_upper$coefficients)
+    coefs = list(
+      "0.025" = fit0.025$coefficients, 
+      "0.05"  = fit0.05$coefficients, 
+      "0.1"   = fit0.1$coefficients, 
+      "0.5"   = fit0.5$coefficients, 
+      "0.9"   = fit0.9$coefficients, 
+      "0.95"  = fit0.95$coefficients, 
+      "0.975" = fit0.975$coefficients
+    )
   ))
 }
 
 foptions <- furrr_options(packages = c("sl3", "dplyr", "R6", "data.table"), seed = TRUE)
 
-plan(multisession, workers = 4)
+plan(multisession, workers = 40)
 
 set.seed(1553)
+N_sims <- 50
 setup <- expand_grid(
-  index = 1:25,
-  #N = c(250, 500, 1000),
+  index = 1:N_sims,
   N = c(250, 500, 1000),
-  #dgp = c("simple", "complex")
   dgp = "complex",
 ) %>%
   mutate(seed = 1:n(),
          data = pmap(list(seed, N, dgp), simulate))
 
 results <- setup %>%
-  mutate(fit = future_map(data, fit, .options = options))
+  mutate(fit = future_map(data, fit, .options = foptions))
 
 write_rds(results, "iid_simulation_results.rds")
