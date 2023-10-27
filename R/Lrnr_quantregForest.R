@@ -1,6 +1,6 @@
-##' quantreg learner
+##' quantregForest learner
 ##'
-##' This learner uses \code{\link[quantreg]{quantreg}}
+##' This learner uses \code{\link[quantregForest]{quantregForest}}
 ##' to fit a quantile regression model.
 ##'
 ##' @docType class
@@ -27,13 +27,13 @@
 ##'      Also, any additional parameters that can be considered by 
 ##'      \code{\link{Lrnr_base}}.
 ##' 
-Lrnr_quantreg <- R6Class(
-  classname = "Lrnr_quantreg", 
+Lrnr_quantregForest <- R6Class(
+  classname = "Lrnr_quantregForest", 
   inherit = Lrnr_base,
   portable = TRUE, 
   class = TRUE,
   public = list(
-    initialize = function(tau = 0.5, method = "br", ...) {
+    initialize = function(tau = 0.5, ...) {
       # this captures all parameters to initialize and saves them as self$params
       params <- args_to_list()
       super$initialize(params = params, ...)
@@ -49,35 +49,20 @@ Lrnr_quantreg <- R6Class(
       args <- self$params
       outcome_type <- self$get_outcome_type(task)
       
-      args$x <- bind_cols(Intercept = rep(1, nrow(task$X)), task$X)
+      args$x <- task$X
       args$y <- outcome_type$format(task$Y)
-
-      if(!is.null(args$method) && args$method == "lasso") {
-        fit_object <- Map(function(tau) quantreg::rq.fit.lasso(as.matrix(args$x), args$y, tau = tau, lambda = args$lambda), args$tau)
-      }
-      else {
-        fit_object <- Map(function(tau) quantreg::rq.fit(args$x, args$y, tau = tau, method = args$method), args$tau)
-      }
+      
+      fit_object <- sl3:::call_with_args(quantregForest::quantregForest, args, keep_all = TRUE)
       
       return(fit_object)
     },
 
     # .predict takes a task and returns predictions from that task
     .predict = function(task = NULL) {
-      mat <- matrix(unlist(Map(function(fit_object) {
-        x <- as.matrix(dplyr::bind_cols(intercept = rep(1, nrow(task$X)), task$X))
-        predictions <- drop(x %*% fit_object$coefficients)
-        return(predictions)
-      }, self$fit_object)), ncol = length(self$fit_object), byrow = FALSE)
-      if(length(self$params$tau) > 1) {
-        pack_predictions(mat)
-      }
-      else {
-        mat
-      }
+      predictions <- predict(self$fit_object, newdata = task$X, what = self$params$tau)
+      return(predictions)
     },
     # list any packages required for your learner here.
-    .required_packages = c("quantreg")
+    .required_packages = c("quantregForest")
   )
 )
-
