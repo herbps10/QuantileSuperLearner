@@ -49,11 +49,16 @@ Lrnr_quantreg <- R6Class(
       args <- self$params
       outcome_type <- self$get_outcome_type(task)
       
-      args$x <- bind_cols(rep(1, nrow(task$X)), task$X)
+      args$x <- bind_cols(Intercept = rep(1, nrow(task$X)), task$X)
       args$y <- outcome_type$format(task$Y)
       args$keep.inbag = TRUE
 
-      fit_object <- Map(function(tau) quantreg::rq.fit(args$x, args$y, tau = tau), args$tau)
+      if(!is.null(args$method) && args$method == "lasso") {
+        fit_object <- Map(function(tau) quantreg::rq.fit.lasso(as.matrix(args$x), args$y, tau = tau, lambda = args$lambda), args$tau)
+      }
+      else {
+        fit_object <- Map(function(tau) quantreg::rq.fit(args$x, args$y, tau = tau), args$tau)
+      }
       
       return(fit_object)
     },

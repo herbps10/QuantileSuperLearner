@@ -154,7 +154,7 @@ plan(multisession, workers = 4)
 
 set.seed(1553)
 setup <- expand_grid(
-  index = 1:25,
+  index = 1:1,
   #N = c(250, 500, 1000),
   N = c(250, 500, 1000),
   #dgp = c("simple", "complex")
@@ -164,6 +164,6 @@ setup <- expand_grid(
          data = pmap(list(seed, N, dgp), simulate))
 
 results <- setup %>%
-  mutate(fit = future_map(data, fit, .options = options))
+  mutate(fit = future_map(data, fit, .options = foptions))
 
 write_rds(results, "iid_simulation_results.rds")

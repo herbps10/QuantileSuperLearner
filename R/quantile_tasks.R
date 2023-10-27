@@ -17,7 +17,8 @@ quantile_sl <- function(task, tau) {
   gbm_learner <- Lrnr_gbm$new(distribution = list(name = "quantile", alpha = tau), interaction.depth = 2, shrinkage = 0.1)
   
   solnp <- Lrnr_solnp$new(eval_function = loss_quantile(tau))
-  sl <- Lrnr_sl$new(learners = list(lightgbm_learner, quantreg_learner, grf_learner, qrnn_learner, drf_learner), cv_control = list(V = 5), solnp)
+  #sl <- Lrnr_sl$new(learners = list(lightgbm_learner, quantreg_learner, grf_learner, qrnn_learner, drf_learner), cv_control = list(V = 5), solnp)
+  sl <- Lrnr_sl$new(learners = list(quantreg_learner, quantreg_learner), cv_control = list(V = 5), solnp)
   
   sl_fit <- sl$train(task)
   sl_fit

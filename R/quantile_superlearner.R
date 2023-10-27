@@ -20,13 +20,13 @@ source("R/quantile_tasks.R")
 
 source("R/cv.R")
 
-plan(multisession, workers = 3)
+plan(sequential)
 
 quantiles <- c(0.1, 0.5, 0.9)
 setup <- tribble(
   ~name, ~task,
-  "Energy Formation", perovskite_task_formation,
-  "Energy Bandgap", perovskite_task
+  "Energy Formation", perovskite_task_formation
+  #"Energy Bandgap", perovskite_task
 ) %>%
   expand_grid(quantile = quantiles) %>%
   mutate(fit = future_map2(task, quantile, quantile_sl),
