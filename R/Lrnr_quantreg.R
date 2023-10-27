@@ -33,7 +33,7 @@ Lrnr_quantreg <- R6Class(
   portable = TRUE, 
   class = TRUE,
   public = list(
-    initialize = function(tau = 0.5, ...) {
+    initialize = function(tau = 0.5, method = "br", ...) {
       # this captures all parameters to initialize and saves them as self$params
       params <- args_to_list()
       super$initialize(params = params, ...)
@@ -51,13 +51,12 @@ Lrnr_quantreg <- R6Class(
       
       args$x <- bind_cols(Intercept = rep(1, nrow(task$X)), task$X)
       args$y <- outcome_type$format(task$Y)
-      args$keep.inbag = TRUE
 
       if(!is.null(args$method) && args$method == "lasso") {
         fit_object <- Map(function(tau) quantreg::rq.fit.lasso(as.matrix(args$x), args$y, tau = tau, lambda = args$lambda), args$tau)
       }
       else {
-        fit_object <- Map(function(tau) quantreg::rq.fit(args$x, args$y, tau = tau), args$tau)
+        fit_object <- Map(function(tau) quantreg::rq.fit(args$x, args$y, tau = tau, method = args$method), args$tau)
       }
       
       return(fit_object)
@@ -66,7 +65,7 @@ Lrnr_quantreg <- R6Class(
     # .predict takes a task and returns predictions from that task
     .predict = function(task = NULL) {
       mat <- matrix(unlist(Map(function(fit_object) {
-        x <- as.matrix(bind_cols(intercept = rep(1, nrow(task$X)), task$X))
+        x <- as.matrix(dplyr::bind_cols(intercept = rep(1, nrow(task$X)), task$X))
         predictions <- drop(x %*% fit_object$coefficients)
         return(predictions)
       }, self$fit_object)), ncol = length(self$fit_object), byrow = FALSE)
